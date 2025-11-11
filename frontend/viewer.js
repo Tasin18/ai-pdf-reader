@@ -358,8 +358,30 @@
   }
 
   /** Ensure the given word has info and render it in the single panel. */
+  function startTqdm(container, label){
+    if (!container) return () => {};
+    // Clear current content and show a compact loader
+    container.className = 'word-single';
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'tqdm-loader';
+    const text = document.createElement('span');
+    text.textContent = label || 'Generating…';
+    const bar = document.createElement('div');
+    bar.className = 'tqdm-bar';
+    const chunk = document.createElement('span');
+    bar.appendChild(chunk);
+    wrap.appendChild(text);
+    wrap.appendChild(bar);
+    container.appendChild(wrap);
+    // Return stop function that removes the loader
+    return () => { try { wrap.remove(); } catch(_){} };
+  }
+
   async function ensureAndRender(word) {
     if (!state.pdfId) return;
+    // Show tiny tqdm-like animation while waiting for LLM/backend
+    const stopLoader = startTqdm(singleWordPanel, 'Generating…');
     try{
       const res = await fetch('/api/word/ensure', {
         method: 'POST',
@@ -368,14 +390,17 @@
       });
       const data = await res.json();
       if (!res.ok) {
+        stopLoader();
         const msg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
         if (res.status === 429) showToast('Rate limited. Please try again in a bit.', 'error');
         else showToast(`Failed: ${msg}`, 'error');
         return;
       }
+      stopLoader();
       renderSingleWord(data.word);
     }catch(e){
       console.error(e);
+      stopLoader();
       showToast('Failed to load word', 'error');
     }
   }
