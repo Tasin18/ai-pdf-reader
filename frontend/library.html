@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI PDF Reader - Library</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .library{padding:12px}
+    .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff}
+    .card h3{margin:0 0 6px 0;font-size:16px}
+    .card .meta{font-size:12px;color:#64748b;margin-bottom:8px}
+    .card .actions{display:flex;gap:8px}
+    .btn{padding:6px 10px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer}
+    .btn.primary{background:#0ea5e9;color:#fff;border-color:#0284c7}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Library</h1>
+  </header>
+  <main class="library">
+    <div class="toolbar">
+      <button class="btn" onclick="location.href='/'">← Back to Reader</button>
+    </div>
+    <div id="grid" class="grid"></div>
+  </main>
+  <div id="toastContainer" class="toast-container"></div>
+  <script src="/static/library.js"></script>
+</body>
+</html>

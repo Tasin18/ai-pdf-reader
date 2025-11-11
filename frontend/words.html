@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI PDF Reader - Words</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .words-page{padding:12px}
+    .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    ul.word-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+    .word{border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff}
+    .word h3{margin:0 0 6px 0;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Words</h1>
+  </header>
+  <main class="words-page">
+    <div class="toolbar">
+      <button class="btn" onclick="location.href='/'">← Back to Reader</button>
+      <button class="btn" onclick="location.href='/library.html'">📚 Library</button>
+    </div>
+    <ul id="wordList" class="word-list"></ul>
+  </main>
+  <div id="toastContainer" class="toast-container"></div>
+  <script src="/static/words.js"></script>
+</body>
+</html>

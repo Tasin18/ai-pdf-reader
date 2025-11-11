@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI PDF Reader</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/vendor/pdf_viewer.min.css" />
+  <!-- Use locally vendored PDF.js assets -->
+  <script src="/static/vendor/pdf.min.js"></script>
+  <script src="/static/vendor/pdf_viewer.min.js"></script>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <h1 style="margin:0">AI PDF Reader</h1>
+      <nav>
+        <a href="/library.html" class="pill" style="text-decoration:none">📚 Library</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="left">
+      <div class="upload">
+        <input type="file" id="fileInput" accept="application/pdf" />
+        <button id="uploadBtn">Upload</button>
+        <span id="uploadStatus"></span>
+      </div>
+      <div id="llmStatus" class="llmStatus">
+        <div class="info"><span class="pill">LLM</span><span id="llmInfoText">Checking…</span></div>
+        <div class="actions">
+          <button id="btnTestLLM" title="Run a quick LLM test">Test LLM</button>
+        </div>
+      </div>
+      <div id="pdfControls" class="hidden">
+        <button id="prevPage">Prev</button>
+        <button id="zoomOut">-</button>
+        <button id="zoomIn">+</button>
+        <button id="toggleToc" title="Open Table of Contents">TOC</button>
+        <label title="Go to page" style="margin:0 6px;display:inline-flex;align-items:center;gap:4px">
+          Pg
+          <input id="gotoPageInput" type="number" min="1" value="1" style="width:64px" />
+          <button id="gotoPageBtn">Go</button>
+        </label>
+        <button id="toggleHighlight" title="Toggle highlight mode">Highlight</button>
+        <select id="highlightColor" title="Highlight color">
+          <option value="#fff176">Yellow</option>
+          <option value="#ff8a65">Orange</option>
+          <option value="#81c784">Green</option>
+          <option value="#4fc3f7">Blue</option>
+          <option value="#ce93d8">Purple</option>
+        </select>
+        <button id="toggleEraser" title="Erase highlights (behavior depends on mode)">Erase</button>
+        <select id="eraseMode" title="Erase mode">
+          <option value="click">Undo (click)</option>
+          <option value="toggle">Toggle on</option>
+        </select>
+        <button id="saveHighlights" title="Embed highlights into PDF" disabled>Save Highlights</button>
+        <label style="margin-left:8px">Zoom:
+          <select id="scaleMode">
+            <option value="page-width">Fit width</option>
+            <option value="page-fit">Fit page</option>
+            <option value="actual">Actual size</option>
+          </select>
+        </label>
+        <span id="pageInfo"></span>
+        <button id="nextPage">Next</button>
+      </div>
+      <div class="viewerWrap">
+        <div style="display:flex;gap:8px;height:100%;position:relative">
+          <aside id="tocPane" class="toc hidden"></aside>
+          <div class="viewerSlot"><div id="viewerContainer" class="viewer"><div id="viewer" class="pdfViewer"></div></div></div>
+        </div>
+      </div>
+    </section>
+    <aside class="right">
+      <div class="dashboard">
+        <h2>Word Dashboard</h2>
+        <div class="actions" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button id="refreshWordPanel">Refresh</button>
+          <button id="openAllWords" title="View all words for this PDF">All Words →</button>
+        </div>
+        <div id="singleWordPanel" class="word-single"></div>
+      </div>
+    </aside>
+  </main>
+  <div id="toastContainer" class="toast-container"></div>
+  <script src="/static/viewer.js"></script>
+</body>
+</html>

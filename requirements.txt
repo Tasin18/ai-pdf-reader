@@ -1,0 +1,7 @@
+Flask==3.0.3
+Flask-Cors==4.0.1
+python-dotenv==1.0.1
+cerebras-cloud-sdk==1.7.0
+# Pin httpx to a version compatible with current Cerebras SDK (avoid proxies kwarg error)
+httpx<0.28
+pypdf==4.3.1
