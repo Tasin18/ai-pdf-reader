@@ -425,6 +425,29 @@ def create_app() -> Flask:
             logger.exception("Failed to remove highlights for %s", pdf_id)
             return jsonify({"error": "Failed to remove highlights", "errorType": type(e).__name__, "message": str(e)}), 500
 
+    @app.post('/api/pdf/<pdf_id>/text-annotations')
+    def save_text_annotations(pdf_id: str):
+        """Save text (FreeText) annotations to the PDF file.
+
+        Expected JSON body:
+        { annotations: [ { page: 1, data: {...serialized PDF.js annotation...} }, ... ] }
+        """
+        data = request.get_json(silent=True) or {}
+        items = data.get('annotations') or []
+        if not isinstance(items, list):
+            return jsonify({"error": "annotations must be a list"}), 400
+        rec = dbm.get_pdf(pdf_id)
+        if not rec:
+            return jsonify({"error": "Not found"}), 404
+        path = os.path.join(PDF_DIR, rec['filename'])
+        try:
+            from .pdf_edit import add_text_annotations_to_pdf
+            count = add_text_annotations_to_pdf(path, items)
+            return jsonify({"ok": True, "count": count})
+        except Exception as e:
+            logger.exception("Failed to save text annotations for %s", pdf_id)
+            return jsonify({"error": "Failed to save text annotations", "errorType": type(e).__name__, "message": str(e)}), 500
+
     return app
 
 

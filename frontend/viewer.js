@@ -33,6 +33,8 @@
   const gotoPageBtn = document.getElementById('gotoPageBtn');
   const tocPane = document.getElementById('tocPane');
   const toggleTocBtn = document.getElementById('toggleToc');
+  const toggleTextAnnotationBtn = document.getElementById('toggleTextAnnotation');
+  const saveTextAnnotationsBtn = document.getElementById('saveTextAnnotations');
 
   const state = {
     pdfId: localStorage.getItem('pdfId') || null,
@@ -42,6 +44,7 @@
     scale: 1.25,
     highlightMode: false,
     eraserMode: false,
+    textAnnotationMode: false,
     pendingHighlights: [], // {page, color:[r,g,b], rects:[{left,top,width,height,pageNumber}]}
   };
 
@@ -126,6 +129,7 @@
       eventBus,
       linkService,
       textLayerMode: 2,
+      annotationEditorMode: 0, // 0=none initially; will toggle to 3 (FreeText) for notes
     });
     linkService.setViewer(pdfViewer);
     // Update page info when page changes
@@ -838,6 +842,87 @@
     if (state.eraserMode) {
       // If user has a selection, attempt removing embedded highlights overlapping that selection
       await removeEmbeddedHighlightsFromSelection();
+    }
+  });
+
+  // Text annotation mode toggle
+  if (toggleTextAnnotationBtn) toggleTextAnnotationBtn.addEventListener('click', () => {
+    state.textAnnotationMode = !state.textAnnotationMode;
+    toggleTextAnnotationBtn.classList.toggle('active', state.textAnnotationMode);
+    toggleTextAnnotationBtn.textContent = state.textAnnotationMode ? '📝 Note: ON' : '📝 Add Note';
+    const viewer = pdfViewerInstance;
+    if (!viewer) return;
+    // PDF.js annotation editor modes: 0=none, 3=FreeText
+    if (state.textAnnotationMode) {
+      viewer.annotationEditorMode = 3; // Enable FreeText annotation mode
+      if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.disabled = false;
+      // Turn off other modes
+      if (state.highlightMode) {
+        state.highlightMode = false;
+        if (toggleHighlightBtn) { toggleHighlightBtn.classList.remove('active'); toggleHighlightBtn.textContent = 'Highlight'; }
+      }
+      if (state.eraserMode) {
+        state.eraserMode = false;
+        if (toggleEraserBtn) { toggleEraserBtn.classList.remove('active'); toggleEraserBtn.textContent = 'Erase'; }
+        viewerContainer.classList.remove('eraser-on');
+      }
+    } else {
+      viewer.annotationEditorMode = 0; // Disable
+    }
+  });
+
+  // Save text annotations
+  if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.addEventListener('click', async () => {
+    if (!state.pdfId) return;
+    const viewer = pdfViewerInstance;
+    if (!viewer) return;
+    try {
+      // Serialize annotations from PDF.js annotation editor
+      const annotations = [];
+      const pages = viewer._pages || [];
+      for (let i = 0; i < pages.length; i++) {
+        const pageView = pages[i];
+        if (!pageView || !pageView.annotationEditorLayer) continue;
+        const editors = pageView.annotationEditorLayer._editors || new Map();
+        editors.forEach(editor => {
+          if (editor.editorType === 3) { // FreeText
+            const serialized = editor.serialize();
+            if (serialized) {
+              annotations.push({
+                page: i + 1,
+                data: serialized
+              });
+            }
+          }
+        });
+      }
+      if (!annotations.length) {
+        showToast('No text annotations to save', 'error');
+        return;
+      }
+      const keepPage = state.currentPage;
+      const res = await fetch(`/api/pdf/${state.pdfId}/text-annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ annotations })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok !== true) throw new Error(data.error || 'Save failed');
+      showToast(`Saved ${data.count || 0} text note${(data.count||0)===1?'':'s'}`);
+      if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.disabled = true;
+      // Reload PDF
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await loadPdf(keepPage);
+          break;
+        } catch (e) {
+          if (attempt === 4) throw e;
+          await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to save text annotations', 'error');
     }
   });
 

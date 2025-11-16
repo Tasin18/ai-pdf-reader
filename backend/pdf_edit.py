@@ -297,3 +297,100 @@ def undo_last_highlight(pdf_path: str) -> int:
         except Exception:
             pass
     return 1
+
+
+def add_text_annotations_to_pdf(pdf_path: str, annotations: List[Dict[str, Any]]):
+    """Add FreeText annotations to the PDF file in-place.
+
+    annotations: list of items with keys:
+      - page: 1-based page index
+      - data: serialized annotation data from PDF.js (includes rect, contents, color, etc.)
+    
+    Returns: number of annotations added
+    """
+    pdf_path = os.path.abspath(pdf_path)
+    reader = PdfReader(pdf_path)
+    writer = PdfWriter()
+    
+    # Clone document if helper available to preserve outlines
+    if hasattr(writer, 'clone_document_from_reader'):
+        writer.clone_document_from_reader(reader)
+    else:
+        for i in range(len(reader.pages)):
+            writer.add_page(reader.pages[i])
+    
+    count = 0
+    # Group annotations by page
+    by_page = {}
+    for item in annotations:
+        page_num = item.get('page', 1)
+        if page_num < 1 or page_num > len(writer.pages):
+            continue
+        if page_num not in by_page:
+            by_page[page_num] = []
+        by_page[page_num].append(item)
+    
+    for page_num, items in by_page.items():
+        page = writer.pages[page_num - 1]
+        
+        # Ensure /Annots array exists
+        if NameObject("/Annots") not in page:
+            page[NameObject("/Annots")] = ArrayObject()
+        
+        annots = page[NameObject("/Annots")]
+        try:
+            ann_array = annots.get_object() if hasattr(annots, 'get_object') else annots
+        except Exception:
+            ann_array = annots
+        
+        if not isinstance(ann_array, ArrayObject):
+            ann_array = ArrayObject()
+            page[NameObject("/Annots")] = ann_array
+        
+        for item in items:
+            data = item.get('data', {})
+            # Extract fields from PDF.js serialized annotation
+            rect = data.get('rect', [100, 100, 200, 150])  # [x1, y1, x2, y2]
+            contents = data.get('value', '') or data.get('contents', '')
+            color = data.get('color', [1, 1, 0])  # RGB 0-255 from PDF.js
+            # Normalize color to 0-1 range if needed
+            if color and len(color) >= 3 and max(color) > 1:
+                color = [c/255.0 for c in color[:3]]
+            
+            annot = DictionaryObject()
+            annot.update({
+                NameObject("/Type"): NameObject("/Annot"),
+                NameObject("/Subtype"): NameObject("/FreeText"),
+                NameObject("/Rect"): ArrayObject([FloatObject(v) for v in rect]),
+                NameObject("/Contents"): data.get('value', '') or '',
+                NameObject("/C"): ArrayObject([FloatObject(c) for c in color[:3]]),
+                NameObject("/F"): NumberObject(4),  # Print flag
+                NameObject("/DA"): "/Helv 12 Tf",  # Default appearance
+            })
+            
+            ann_array.append(annot)
+            count += 1
+    
+    # Write to temp file and atomic replace
+    if count == 0:
+        return 0
+    
+    # Ensure any file handles are closed before writing
+    reader.stream.close() if hasattr(reader, 'stream') and reader.stream else None
+    
+    dirn = os.path.dirname(pdf_path)
+    fd, tmp = tempfile.mkstemp(prefix="text-annot-", suffix=".pdf", dir=dirn)
+    try:
+        os.close(fd)
+        with open(tmp, "wb") as f:
+            writer.write(f)
+        _atomic_replace(tmp, pdf_path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+    
+    return count
+
