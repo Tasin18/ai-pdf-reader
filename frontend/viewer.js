@@ -129,7 +129,7 @@
       eventBus,
       linkService,
       textLayerMode: 2,
-      annotationEditorMode: 0, // 0=none initially; will toggle to 3 (FreeText) for notes
+      annotationEditorMode: -1, // -1 enables annotation editor support
     });
     linkService.setViewer(pdfViewer);
     // Update page info when page changes
@@ -852,9 +852,14 @@
     toggleTextAnnotationBtn.textContent = state.textAnnotationMode ? '📝 Note: ON' : '📝 Add Note';
     const viewer = pdfViewerInstance;
     if (!viewer) return;
-    // PDF.js annotation editor modes: 0=none, 3=FreeText
+    // PDF.js AnnotationEditorType: NONE=0, FREETEXT=3, INK=15
     if (state.textAnnotationMode) {
-      viewer.annotationEditorMode = 3; // Enable FreeText annotation mode
+      // Enable FreeText annotation mode (3)
+      try {
+        viewer.annotationEditorMode = 3;
+      } catch (e) {
+        console.warn('Failed to set annotation mode', e);
+      }
       if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.disabled = false;
       // Turn off other modes
       if (state.highlightMode) {
@@ -867,7 +872,12 @@
         viewerContainer.classList.remove('eraser-on');
       }
     } else {
-      viewer.annotationEditorMode = 0; // Disable
+      // Disable annotation editor
+      try {
+        viewer.annotationEditorMode = 0;
+      } catch (e) {
+        console.warn('Failed to disable annotation mode', e);
+      }
     }
   });
 
