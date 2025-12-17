@@ -26,12 +26,6 @@
         <button id="uploadBtn">Upload</button>
         <span id="uploadStatus"></span>
       </div>
-      <div id="llmStatus" class="llmStatus">
-        <div class="info"><span class="pill">LLM</span><span id="llmInfoText">Checking…</span></div>
-        <div class="actions">
-          <button id="btnTestLLM" title="Run a quick LLM test">Test LLM</button>
-        </div>
-      </div>
       <div id="pdfControls" class="hidden">
         <button id="prevPage">Prev</button>
         <button id="zoomOut">-</button>
@@ -58,6 +52,7 @@
         <button id="saveHighlights" title="Embed highlights into PDF" disabled>Save Highlights</button>
         <button id="toggleTextAnnotation" title="Add text notes anywhere in PDF">📝 Add Note</button>
         <button id="saveTextAnnotations" title="Save text notes to PDF" disabled>Save Notes</button>
+        <button id="deleteTextAnnotations" title="Click to select and delete saved notes">🗑️ Delete Note</button>
         <label style="margin-left:8px">Zoom:
           <select id="scaleMode">
             <option value="page-width">Fit width</option>

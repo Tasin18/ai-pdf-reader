@@ -448,6 +448,28 @@ def create_app() -> Flask:
             logger.exception("Failed to save text annotations for %s", pdf_id)
             return jsonify({"error": "Failed to save text annotations", "errorType": type(e).__name__, "message": str(e)}), 500
 
+    @app.post('/api/pdf/<pdf_id>/text-annotations/remove')
+    def remove_text_annotations(pdf_id: str):
+        """Remove specific FreeText annotation(s) from the PDF file.
+        
+        Expected JSON body:
+        { targets: [ { page: 1, rect: [x1, y1, x2, y2] }, ... ] }
+        If targets is empty or not provided, removes all FreeText annotations.
+        """
+        rec = dbm.get_pdf(pdf_id)
+        if not rec:
+            return jsonify({"error": "Not found"}), 404
+        path = os.path.join(PDF_DIR, rec['filename'])
+        data = request.get_json(silent=True) or {}
+        targets = data.get('targets', [])
+        try:
+            from .pdf_edit import remove_text_annotations_from_pdf
+            count = remove_text_annotations_from_pdf(path, targets)
+            return jsonify({"ok": True, "removed": count})
+        except Exception as e:
+            logger.exception("Failed to remove text annotations for %s", pdf_id)
+            return jsonify({"error": "Failed to remove text annotations", "errorType": type(e).__name__, "message": str(e)}), 500
+
     return app
 
 

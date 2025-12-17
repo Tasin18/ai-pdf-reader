@@ -45,7 +45,9 @@
     highlightMode: false,
     eraserMode: false,
     textAnnotationMode: false,
+    deleteNoteMode: false,
     pendingHighlights: [], // {page, color:[r,g,b], rects:[{left,top,width,height,pageNumber}]}
+    textNotes: [], // {page, x, y, width, height, text}
   };
 
   const pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
@@ -124,12 +126,12 @@
     }
     eventBus = new pdfjsViewer.EventBus();
     linkService = new pdfjsViewer.PDFLinkService({ eventBus });
+    
     const pdfViewer = new pdfjsViewer.PDFViewer({
       container: viewerContainer,
       eventBus,
       linkService,
       textLayerMode: 2,
-      annotationEditorMode: -1, // -1 enables annotation editor support
     });
     linkService.setViewer(pdfViewer);
     // Update page info when page changes
@@ -845,22 +847,65 @@
     }
   });
 
+  // Custom text note functions
+  function createTextNote(pageDiv, x, y) {
+    const note = document.createElement('div');
+    note.className = 'text-note';
+    note.style.left = x + 'px';
+    note.style.top = y + 'px';
+    note.contentEditable = 'true';
+    note.textContent = 'Type note here...';
+    note.dataset.page = pageDiv.getAttribute('data-page-number');
+    
+    // Add delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'text-note-delete';
+    deleteBtn.innerHTML = '&times;';
+    deleteBtn.title = 'Delete note';
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Delete this note?')) {
+        note.remove();
+        showToast('Note deleted');
+      }
+    });
+    note.appendChild(deleteBtn);
+    
+    // Select all text on first focus
+    note.addEventListener('focus', function selectAll(e) {
+      const range = document.createRange();
+      range.selectNodeContents(note);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      note.removeEventListener('focus', selectAll);
+    });
+    
+    // Delete key to remove note
+    note.addEventListener('keydown', (e) => {
+      if (e.key === 'Delete' && e.ctrlKey) {
+        e.preventDefault();
+        if (confirm('Delete this note?')) {
+          note.remove();
+          showToast('Note deleted');
+        }
+      }
+    });
+    
+    pageDiv.appendChild(note);
+    note.focus();
+    
+    if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.disabled = false;
+  }
+
   // Text annotation mode toggle
   if (toggleTextAnnotationBtn) toggleTextAnnotationBtn.addEventListener('click', () => {
     state.textAnnotationMode = !state.textAnnotationMode;
     toggleTextAnnotationBtn.classList.toggle('active', state.textAnnotationMode);
     toggleTextAnnotationBtn.textContent = state.textAnnotationMode ? '📝 Note: ON' : '📝 Add Note';
-    const viewer = pdfViewerInstance;
-    if (!viewer) return;
-    // PDF.js AnnotationEditorType: NONE=0, FREETEXT=3, INK=15
+    
     if (state.textAnnotationMode) {
-      // Enable FreeText annotation mode (3)
-      try {
-        viewer.annotationEditorMode = 3;
-      } catch (e) {
-        console.warn('Failed to set annotation mode', e);
-      }
-      if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.disabled = false;
+      viewerContainer.classList.add('text-note-mode');
       // Turn off other modes
       if (state.highlightMode) {
         state.highlightMode = false;
@@ -871,45 +916,195 @@
         if (toggleEraserBtn) { toggleEraserBtn.classList.remove('active'); toggleEraserBtn.textContent = 'Erase'; }
         viewerContainer.classList.remove('eraser-on');
       }
+      showToast('Click anywhere on PDF to add a note');
     } else {
-      // Disable annotation editor
-      try {
-        viewer.annotationEditorMode = 0;
-      } catch (e) {
-        console.warn('Failed to disable annotation mode', e);
-      }
+      viewerContainer.classList.remove('text-note-mode');
     }
   });
 
+  // Handle clicks to add text notes OR delete saved annotations
+  viewerContainer.addEventListener('click', async (e) => {
+    // Delete mode: check if clicking on a saved FreeText annotation
+    if (state.deleteNoteMode) {
+      const annotElement = e.target.closest('.freeTextAnnotation');
+      if (annotElement) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Find the page containing this annotation
+        const pageDiv = annotElement.closest('.page');
+        if (!pageDiv) {
+          console.error('Could not find page div for annotation');
+          return;
+        }
+        
+        console.log('Page div:', pageDiv, 'dataset:', pageDiv.dataset);
+        const pageNum = parseInt(pageDiv.dataset.pageNumber || pageDiv.getAttribute('data-page-number'), 10);
+        console.log('Detected page number:', pageNum);
+        
+        if (!pageNum || isNaN(pageNum)) {
+          showToast('Could not determine page number', 'error');
+          return;
+        }
+        
+        // Get the annotation's position and size
+        const rect = annotElement.getBoundingClientRect();
+        const pageBox = pageDiv.getBoundingClientRect();
+        const relX = rect.left - pageBox.left;
+        const relY = rect.top - pageBox.top;
+        
+        // Convert to PDF coordinates
+        const viewer = pdfViewerInstance;
+        const pageView = viewer.getPageView(pageNum - 1);
+        if (!pageView) return;
+        
+        const viewport = pageView.viewport;
+        const pdfPoint1 = viewport.convertToPdfPoint(relX, relY);
+        const pdfPoint2 = viewport.convertToPdfPoint(relX + rect.width, relY + rect.height);
+        
+        const targetRect = [pdfPoint1[0], pdfPoint1[1], pdfPoint2[0], pdfPoint2[1]];
+        console.log('Deleting annotation on page', pageNum, 'with rect:', targetRect);
+        
+        if (!confirm('Delete this saved note?')) return;
+        
+        try {
+          const res = await fetch(`/api/pdf/${state.pdfId}/text-annotations/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targets: [{
+                page: pageNum,
+                rect: targetRect
+              }]
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.ok !== true) throw new Error(data.error || 'Delete failed');
+          
+          console.log('Delete response:', data, 'removed count:', data.removed);
+          
+          if (!data.removed || data.removed === 0) {
+            showToast('No matching note found to delete', 'error');
+            return;
+          }
+          
+          showToast('Note deleted, reloading PDF...');
+          
+          // Reload PDF - add small delay to ensure file write completes
+          await new Promise(r => setTimeout(r, 200));
+          const keepPage = state.currentPage;
+          for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+              await loadPdf(keepPage);
+              showToast('Note deleted successfully');
+              break;
+            } catch (err) {
+              if (attempt === 4) throw err;
+              await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+            }
+          }
+        } catch (err) {
+          console.error('Failed to delete annotation:', err);
+          showToast(`Failed to delete note: ${err.message}`, 'error');
+        }
+        return;
+      }
+    }
+    
+    if (!state.textAnnotationMode) return;
+    if (e.target.classList.contains('text-note')) return; // Don't create new note when clicking existing
+    
+    const pageDiv = getPageDivFromNode(e.target);
+    if (!pageDiv) return;
+    
+    const pageBox = pageDiv.getBoundingClientRect();
+    const x = e.clientX - pageBox.left;
+    const y = e.clientY - pageBox.top;
+    
+    createTextNote(pageDiv, x, y);
+  });
+
   // Save text annotations
+  const deleteTextAnnotationsBtn = document.getElementById('deleteTextAnnotations');
+  if (deleteTextAnnotationsBtn) deleteTextAnnotationsBtn.addEventListener('click', () => {
+    state.deleteNoteMode = !state.deleteNoteMode;
+    if (state.deleteNoteMode) {
+      deleteTextAnnotationsBtn.classList.add('active');
+      viewerContainer.classList.add('delete-note-mode');
+      showToast('Click on a saved note to delete it');
+    } else {
+      deleteTextAnnotationsBtn.classList.remove('active');
+      viewerContainer.classList.remove('delete-note-mode');
+    }
+  });
+
   if (saveTextAnnotationsBtn) saveTextAnnotationsBtn.addEventListener('click', async () => {
     if (!state.pdfId) return;
     const viewer = pdfViewerInstance;
     if (!viewer) return;
     try {
-      // Serialize annotations from PDF.js annotation editor
+      // Collect all custom text notes from all pages
       const annotations = [];
-      const pages = viewer._pages || [];
-      for (let i = 0; i < pages.length; i++) {
-        const pageView = pages[i];
-        if (!pageView || !pageView.annotationEditorLayer) continue;
-        const editors = pageView.annotationEditorLayer._editors || new Map();
-        editors.forEach(editor => {
-          if (editor.editorType === 3) { // FreeText
-            const serialized = editor.serialize();
-            if (serialized) {
-              annotations.push({
-                page: i + 1,
-                data: serialized
-              });
-            }
+      const allNotes = viewerContainer.querySelectorAll('.text-note');
+      
+      allNotes.forEach(note => {
+        const pageNum = parseInt(note.dataset.page, 10);
+        const pageDiv = viewerContainer.querySelector(`.page[data-page-number="${pageNum}"]`);
+        if (!pageDiv) {
+          console.warn('Page div not found for note on page', pageNum);
+          return;
+        }
+        
+        const pageView = viewer.getPageView(pageNum - 1);
+        if (!pageView) {
+          console.warn('Page view not found for page', pageNum);
+          return;
+        }
+        
+        // Get text content, excluding the delete button
+        let text = '';
+        for (const child of note.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE) {
+            text += child.textContent;
           }
-        });
-      }
+        }
+        text = text.trim();
+        if (!text || text === 'Type note here...') {
+          console.log('Skipping empty note');
+          return;
+        }
+        
+        // Get position relative to page
+        const rect = note.getBoundingClientRect();
+        const pageBox = pageDiv.getBoundingClientRect();
+        const relX = rect.left - pageBox.left;
+        const relY = rect.top - pageBox.top;
+        
+        // Convert to PDF coordinates
+        try {
+          const viewport = pageView.viewport;
+          const pdfPoint = viewport.convertToPdfPoint(relX, relY);
+          const pdfPoint2 = viewport.convertToPdfPoint(relX + rect.width, relY + rect.height);
+          
+          annotations.push({
+            page: pageNum,
+            data: {
+              rect: [pdfPoint[0], pdfPoint[1], pdfPoint2[0], pdfPoint2[1]],
+              value: text,
+              color: [255, 250, 205] // Light yellow
+            }
+          });
+        } catch (e) {
+          console.error('Failed to convert coordinates for note on page', pageNum, e);
+        }
+      });
       if (!annotations.length) {
         showToast('No text annotations to save', 'error');
         return;
       }
+      
+      console.log('Sending annotations to backend:', JSON.stringify(annotations, null, 2));
+      
       const keepPage = state.currentPage;
       const res = await fetch(`/api/pdf/${state.pdfId}/text-annotations`, {
         method: 'POST',
@@ -931,8 +1126,8 @@
         }
       }
     } catch (err) {
-      console.error(err);
-      showToast('Failed to save text annotations', 'error');
+      console.error('Failed to save text annotations:', err);
+      showToast(`Failed to save text annotations: ${err.message}`, 'error');
     }
   });
 

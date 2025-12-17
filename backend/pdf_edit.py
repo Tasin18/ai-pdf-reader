@@ -4,6 +4,8 @@ import time
 from typing import List, Dict, Any, Tuple
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, ArrayObject, FloatObject, NumberObject, TextStringObject
+
 def _atomic_replace(src: str, dst: str, attempts: int = 10, delay: float = 0.05):
     """Replace dst with src, retrying briefly on Windows PermissionError.
     Helps when the file is momentarily locked by antivirus or lingering handles.
@@ -18,7 +20,6 @@ def _atomic_replace(src: str, dst: str, attempts: int = 10, delay: float = 0.05)
             time.sleep(delay)
     if last_err:
         raise last_err
-from pypdf.generic import DictionaryObject, NameObject, ArrayObject, FloatObject, NumberObject
 
 
 def _annotation_from_quads(quads: List[float], color: List[float]):
@@ -362,10 +363,10 @@ def add_text_annotations_to_pdf(pdf_path: str, annotations: List[Dict[str, Any]]
                 NameObject("/Type"): NameObject("/Annot"),
                 NameObject("/Subtype"): NameObject("/FreeText"),
                 NameObject("/Rect"): ArrayObject([FloatObject(v) for v in rect]),
-                NameObject("/Contents"): data.get('value', '') or '',
+                NameObject("/Contents"): TextStringObject(contents),
                 NameObject("/C"): ArrayObject([FloatObject(c) for c in color[:3]]),
                 NameObject("/F"): NumberObject(4),  # Print flag
-                NameObject("/DA"): "/Helv 12 Tf",  # Default appearance
+                NameObject("/DA"): TextStringObject("/Helv 12 Tf"),  # Default appearance
             })
             
             ann_array.append(annot)
@@ -393,4 +394,126 @@ def add_text_annotations_to_pdf(pdf_path: str, annotations: List[Dict[str, Any]]
             pass
     
     return count
+
+
+def remove_text_annotations_from_pdf(pdf_path: str, targets: List[Dict[str, Any]] = None) -> int:
+    """Remove FreeText annotations from the PDF file.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        targets: Optional list of { page: 1-based, rect: [x1, y1, x2, y2] }
+                 If provided, only removes annotations matching these targets.
+                 If None or empty, removes all FreeText annotations.
+    
+    Returns: number of annotations removed
+    """
+    pdf_path = os.path.abspath(pdf_path)
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(pdf_path)
+    
+    with open(pdf_path, "rb") as rf:
+        reader = PdfReader(rf)
+        writer = PdfWriter()
+        if hasattr(writer, "clone_document_from_reader"):
+            writer.clone_document_from_reader(reader)
+        else:
+            for i in range(len(reader.pages)):
+                writer.add_page(reader.pages[i])
+    
+    removed_count = 0
+    
+    # Group targets by page if provided
+    targets_by_page = {}
+    if targets:
+        print(f"DEBUG: Processing {len(targets)} target(s)")
+        for t in targets:
+            page_num = int(t.get("page", 0))
+            print(f"DEBUG: Target page_num={page_num}, rect={t.get('rect')}")
+            if page_num < 1 or page_num > len(writer.pages):
+                print(f"DEBUG: Page number {page_num} out of range (1-{len(writer.pages)})")
+                continue
+            rects = targets_by_page.setdefault(page_num - 1, [])
+            rect = t.get("rect", [])
+            if isinstance(rect, (list, tuple)) and len(rect) == 4:
+                rects.append(tuple(float(x) for x in rect))
+        print(f"DEBUG: targets_by_page={targets_by_page}")
+    
+    # Iterate through all pages
+    for page_idx, page in enumerate(writer.pages):
+        annots = page.get(NameObject("/Annots"))
+        if not annots:
+            continue
+        
+        try:
+            ann_array = annots.get_object() if hasattr(annots, 'get_object') else annots
+        except Exception:
+            ann_array = annots
+        
+        if not isinstance(ann_array, ArrayObject):
+            continue
+        
+        # Filter out FreeText annotations
+        keep = ArrayObject()
+        for ref in ann_array:
+            try:
+                annot = ref.get_object() if hasattr(ref, 'get_object') else ref
+            except Exception:
+                annot = ref
+            
+            subtype = annot.get(NameObject("/Subtype")) if isinstance(annot, DictionaryObject) else None
+            if subtype == NameObject("/FreeText"):
+                # Check if this annotation should be removed
+                should_remove = False
+                if not targets:
+                    # No targets specified, remove all
+                    should_remove = True
+                elif page_idx in targets_by_page:
+                    # Check if this annotation's rect matches any target
+                    rect = annot.get(NameObject("/Rect"))
+                    if isinstance(rect, ArrayObject) and len(rect) == 4:
+                        annot_rect = tuple(float(rect[i]) for i in range(4))
+                        print(f"DEBUG: Page {page_idx}, checking FreeText annot_rect={annot_rect}")
+                        for target_rect in targets_by_page[page_idx]:
+                            print(f"DEBUG: Comparing with target_rect={target_rect}, overlap={_rects_overlap(annot_rect, target_rect, tol=20.0)}")
+                            if _rects_overlap(annot_rect, target_rect, tol=20.0):
+                                should_remove = True
+                                break
+                
+                if should_remove:
+                    print(f"DEBUG: Removing FreeText annotation at {annot_rect if 'annot_rect' in locals() else 'unknown'}")
+                    removed_count += 1
+                    continue
+            
+            keep.append(ref)
+        
+        # Update annotations array
+        if len(keep) > 0:
+            page[NameObject("/Annots")] = keep
+        else:
+            # Remove /Annots key if empty
+            if NameObject("/Annots") in page:
+                del page[NameObject("/Annots")]
+    
+    # Write to temp file and atomic replace
+    if removed_count == 0:
+        return 0
+    
+    # Ensure any file handles are closed before writing
+    reader.stream.close() if hasattr(reader, 'stream') and reader.stream else None
+    
+    dirn = os.path.dirname(pdf_path)
+    fd, tmp = tempfile.mkstemp(prefix="remove-text-annot-", suffix=".pdf", dir=dirn)
+    try:
+        os.close(fd)
+        with open(tmp, "wb") as f:
+            writer.write(f)
+        _atomic_replace(tmp, pdf_path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+    
+    return removed_count
 
